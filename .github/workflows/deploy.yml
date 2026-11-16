@@ -1,0 +1,73 @@
+name: Import and publish UNDERTALE browser versions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out destination repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Retrieve the exact browser games from their public source
+        shell: bash
+        run: |
+          git clone -q --depth 1 --branch main https://github.com/LeeBingsu/UNDERTALE.git /tmp/undertale-source
+          cp /tmp/undertale-source/{UNDERTALE,SansBattles,Rejuvenation,TheFinalExperiment,LastBreathTrio}.html .
+          # Match all five Git blob IDs from the uploaded archive.
+          printf '%s\n' \
+            '16ae27718f16c697ec8681e2c7e8d5ec178f8222 UNDERTALE.html' \
+            'd25f3dff516f549f8464283b45e0a332c0cbf3c3 SansBattles.html' \
+            '6500e0b41dc28d2c1b46b76abb73b4a4c1b70acd Rejuvenation.html' \
+            'd846047d77a03559bf8e45162acb71e81500c228 TheFinalExperiment.html' \
+            '5e39904fb2e5396e997d8728400d7c8732d1a6f9 LastBreathTrio.html' | while read -r expected filename; do
+              actual=$(git hash-object "$filename")
+              if [[ "$actual" != "$expected" ]]; then
+                echo "Unexpected content in $filename (expected $expected, got $actual)" >&2
+                exit 1
+              fi
+            done
+      - name: Commit game files for direct downloads
+        shell: bash
+        run: |
+          touch .nojekyll
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- .nojekyll UNDERTALE.html SansBattles.html Rejuvenation.html TheFinalExperiment.html LastBreathTrio.html
+          if ! git diff --cached --quiet; then
+            git commit -m 'Import five self-contained browser games from upstream'
+            git push origin HEAD:main
+          fi
+
+  deploy:
+    needs: import
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out updated repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v4
